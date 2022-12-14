@@ -7,7 +7,7 @@ media files.
 
 While this can be achieved using the [Storm
 protocol](https://github.com/Storm-WG/storm-spec), which is a powerful protocol
-for distributed storage, we believe users shouldn't need to rely on a single
+for distributed storage, it is preferable not to rely on a single
 file exchange medium, in order for the RGB ecosystem to be as resilient as
 possible.
 
