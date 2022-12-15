@@ -111,8 +111,14 @@ Params:
 
 #### response
 
+On first successful upload:
 ```json
-{ "id": 8, "result": null }
+{ "id": 8, "result": true }
+```
+
+On successive successful uploads (of the same media file):
+```json
+{ "id": 8, "result": false }
 ```
 
 Errors:
@@ -172,12 +178,19 @@ Params:
 
 #### response
 
+On first successful POST:
 ```json
-{ "id": 7, "result": null }
+{ "id": 7, "result": true }
 ```
 
+On successive successful POSTs (of the same ACK value):
+```json
+{ "id": 7, "result": false }
+```
+
+
 Errors:
-- [`-100`](#ack-again--100)
+- [`-100`](#change-ack--100)
 - [`-200`](#ack--200)
 - [`-202`](#blinded-utxo--202)
 - [`-300`](#ack--300)
@@ -229,14 +242,14 @@ Errors follow [JSON-RPC 2.0] rules and their codes are divided in 4 categories:
 [Not found](#not-found).
 
 In the error examples `<req_params>` (`error.data`) will contain the client
-request body.
+request `params`.
 
 ### Cannot
 
-#### ACK again (-100)
+#### Change ACK (-100)
 
 ```json
-{ "id": 2, "error": "{ \"code\": -100, \"message\": \"Cannot ACK again\", \"data\": <req_params> }" }
+{ "id": 2, "error": "{ \"code\": -100, \"message\": \"Cannot change ACK\", \"data\": <req_params> }" }
 ```
 
 #### Change uploaded file (-101)
