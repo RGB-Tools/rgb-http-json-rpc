@@ -18,10 +18,10 @@ The protocol uses a [JSON-RPC 2.0] interface over HTTP(s).
 In order to be compliant with the protocol, an implementation must support all
 the [protocol methods](#protocol-methods).
 
-The protocol is intended to be included as a possible consignment endpoint
-type in the [LNP/BP Invoice Library](https://github.com/LNP-BP/invoices).
+The protocol is supported as a consignment endpoint type in the `Invoice`
+provided by [rgb-wallet](https://github.com/RGB-WG/rgb-wallet).
 
-Protocol version is `0.1`.
+Protocol version is `0.2`.
 
 
 ## Protocol methods
@@ -37,7 +37,7 @@ Protocol version is `0.1`.
 #### response
 
 ```json
-{ "id": 0, "result": { "protocol_version": "0.1", "version": "0.1.0", "uptime": 42069 } }
+{ "id": 0, "result": { "protocol_version": "0.2", "version": "0.2.0", "uptime": 42069 } }
 ```
 
 ### consignment.post
@@ -48,11 +48,13 @@ In addition to the parameters, the consignment file needs to be attached under
 the `file` name via multipart form.
 
 ```json
-{ "id": 9, "method": "consignment.post", "params": { "blinded_utxo": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7" } }
+{ "id": 9, "method": "consignment.post", "params": { "recipient_id": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7", "txid": "9ccf8491394e6aa2bec99f08ee8a856879505e07791b3aac79f56177808eb49f" } }
 ```
 
 Params:
-- `blinded_utxo`: the blinded UTXO for which we want to upload a consignment file
+- `recipient_id`: the recipient ID for which we want to upload a consignment file
+- `txid`: the txid of the related transfer
+- `vout`: [optional] the vout for the related transfer
 
 #### response
 
@@ -67,33 +69,36 @@ On successive successful uploads (of the same consignment file):
 ```
 
 Errors:
-- [`-101`](#change-uploaded-file--101)
-- [`-202`](#blinded-utxo--202)
-- [`-302`](#blinded-utxo--302)
-- [`-303`](#file--303)
+- [`-101`](#change-uploaded-file-(-101))
+- [`-202`](#recipient-id-(-202))
+- [`-203`](#txid-(-203))
+- [`-204`](#vout-(-204))
+- [`-302`](#recipient-id-(-302))
+- [`-303`](#file-(-303))
+- [`-304`](#txid-(-304))
 
 ### consignment.get
 
 #### request
 
 ```json
-{ "id": 3, "method": "consignment.get", "params": { "blinded_utxo": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7" } }
+{ "id": 3, "method": "consignment.get", "params": { "recipient_id": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7" } }
 ```
 
 Params:
-- `blinded_utxo`: the blinded UTXO for which we want to get a consignment file
+- `recipient_id`: the recipient ID for which we want to get a consignment file
 
 #### response
 
 When a consignment is available, it is returned in base64-encoded form:
 ```json
-{ "id": 3, "result": "0f001d0104ffffffff0100f2052a0100000043410496b538e853519c726a2c91e61ec11600ae1390813a627c66fb8be7947be63c52da7589379515d4e0a604f8141781e62294721166bf621e73a82cbf2342c858eeac00000000" }
+{ "id": 3, "result": {"consignment": "0f001d0104ffffffff0100f2052a0100000043410496b538e853519c726a2c91e61ec11600ae1390813a627c66fb8be7947be63c52da7589379515d4e0a604f8141781e62294721166bf621e73a82cbf2342c858eeac00000000", "txid": "9ccf8491394e6aa2bec99f08ee8a856879505e07791b3aac79f56177808eb49f"} }
 ```
 
 Errors:
-- [`-202`](#blinded-utxo--202)
-- [`-302`](#blinded-utxo--302)
-- [`-400`](#consignment-file--400)
+- [`-202`](#recipient-id-(-202))
+- [`-302`](#recipient-id-(-302))
+- [`-400`](#consignment-file-(-400))
 
 ### media.post
 
@@ -122,10 +127,10 @@ On successive successful uploads (of the same media file):
 ```
 
 Errors:
-- [`-101`](#change-uploaded-file--101)
-- [`-201`](#attachment-id--201)
-- [`-301`](#attachment-id--301)
-- [`-303`](#file--303)
+- [`-101`](#change-uploaded-file-(-101))
+- [`-201`](#attachment-id-(-201))
+- [`-301`](#attachment-id-(-301))
+- [`-303`](#file-(-303))
 
 ### media.get
 
@@ -146,9 +151,9 @@ When a media is available, it is returned in base64-encoded form:
 ```
 
 Errors:
-- [`-201`](#attachment-id--201)
-- [`-301`](#attachment-id--301)
-- [`-401`](#media-file--401)
+- [`-201`](#attachment-id-(-201))
+- [`-301`](#attachment-id-(-301))
+- [`-401`](#media-file-(-401))
 
 ### ack.post
 
@@ -158,7 +163,7 @@ To accept a consignment:
 
 ```json
 { "id": 7, "method": "ack.post", "params": {
-    "blinded_utxo": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7",
+    "recipient_id": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7",
     "ack": true
 } }
 ```
@@ -167,13 +172,13 @@ To reject a consignment:
 
 ```json
 { "id": 7, "method": "ack.post", "params": {
-    "blinded_utxo": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7",
+    "recipient_id": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7",
     "ack": false
 } }
 ```
 
 Params:
-- `blinded_utxo`: the blinded UTXO for which we want to ACK or NACK its associated consignment file
+- `recipient_id`: the recipiend ID for which we want to ACK or NACK the associated consignment file
 - `ack`: whether the consignment is accepted (`true`) or rejected (`false`)
 
 #### response
@@ -190,23 +195,23 @@ On successive successful POSTs (of the same ACK value):
 
 
 Errors:
-- [`-100`](#change-ack--100)
-- [`-200`](#ack--200)
-- [`-202`](#blinded-utxo--202)
-- [`-300`](#ack--300)
-- [`-302`](#blinded-utxo--302)
-- [`-400`](#consignment-file--400)
+- [`-100`](#change-ack-(-100))
+- [`-200`](#ack-(-200))
+- [`-202`](#recipient-id-(-202))
+- [`-300`](#ack-(-300))
+- [`-302`](#recipient-id-(-302))
+- [`-400`](#consignment-file-(-400))
 
 ### ack.get
 
 #### request
 
 ```json
-{ "id": 9, "method": "ack.get", "params": { "blinded_utxo": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7" } }
+{ "id": 9, "method": "ack.get", "params": { "recipient_id": "txob1nt9ee42dczeu3s0447txykxnqwq2w98ps2c4k8vd9fry903rud7q2wymt7" } }
 ```
 
 Params:
-- `blinded_utxo`: the blinded UTXO for which we want to know if the associated
+- `recipient_id`: the recipiend ID for which we want to know if the associated
   consignment file has been ACKed or NACKed
 
 #### response
@@ -230,9 +235,9 @@ When counterparty has not (yet) acknowledged the consignment:
 ```
 
 Errors:
-- [`-202`](#blinded-utxo--202)
-- [`-302`](#blinded-utxo--302)
-- [`-400`](#consignment-file--400)
+- [`-202`](#recipient-id-(-202))
+- [`-302`](#recipient-id-(-302))
+- [`-400`](#consignment-file-(-400))
 
 
 ## Protocol errors
@@ -272,10 +277,22 @@ request `params`.
 { "id": 1, "error": "{ \"code\": -201, \"message\": \"Invalid attachment ID\", \"data\": <req_params> }" }
 ```
 
-#### Blinded UTXO (-202)
+#### Recipient ID (-202)
 
 ```json
-{ "id": 1, "error": "{ \"code\": -202, \"message\": \"Invalid blinded UTXO\", \"data\": <req_params> }" }
+{ "id": 1, "error": "{ \"code\": -202, \"message\": \"Invalid recipient ID\", \"data\": <req_params> }" }
+```
+
+#### Txid (-203)
+
+```json
+{ "id": 1, "error": "{ \"code\": -203, \"message\": \"Invalid TXID\", \"data\": <req_params> }" }
+```
+
+#### Vout (-204)
+
+```json
+{ "id": 1, "error": "{ \"code\": -204, \"message\": \"Invalid vout\", \"data\": <req_params> }" }
 ```
 
 ### Missing
@@ -292,16 +309,22 @@ request `params`.
 { "id": 1, "error": "{ \"code\": -301, \"message\": \"Missing attachment ID\", \"data\": <req_params> }" }
 ```
 
-#### Blinded UTXO (-302)
+#### Recipient ID (-302)
 
 ```json
-{ "id": 1, "error": "{ \"code\": -302, \"message\": \"Missing blinded UTXO\", \"data\": <req_params> }" }
+{ "id": 1, "error": "{ \"code\": -302, \"message\": \"Missing recipient ID\", \"data\": <req_params> }" }
 ```
 
 #### File (-303)
 
 ```json
 { "id": 1, "error": "{ \"code\": -303, \"message\": \"Missing file\", \"data\": <req_params> }" }
+```
+
+#### Txid (-304)
+
+```json
+{ "id": 1, "error": "{ \"code\": -304, \"message\": \"Missing TXID\", \"data\": <req_params> }" }
 ```
 
 ### Not found
