@@ -344,7 +344,7 @@ request `params`.
 
 ## Known implementations
 
-- [rgb-proxy-server](https://github.com/grunch/rgb-proxy-server)
+- [rgb-proxy-server](https://github.com/RGB-Tools/rgb-proxy-server)
 
 
 [JSON-RPC 2.0]: https://www.jsonrpc.org/specification
