@@ -12,7 +12,9 @@ exchange medium, in order for the RGB ecosystem to be as resilient as possible.
 To provide a simple alternative, we defined this protocol. It can be easily
 implemented in almost any programming language and can use any storage system.
 
-The protocol uses a [JSON-RPC 2.0] interface over HTTP(s).
+The protocol uses a [JSON-RPC 2.0] interface over HTTP(s), with one call per
+request: JSON-RPC batches are not supported (see
+[Protocol methods](#protocol-methods)).
 In order to be compliant with the protocol, an implementation must support all
 the [protocol methods](#protocol-methods).
 
@@ -20,6 +22,10 @@ The protocol is supported as a consignment endpoint type in the `Invoice`
 provided by [rgb-wallet](https://github.com/RGB-WG/rgb-wallet).
 
 Protocol version is `1.0`.
+
+Version `1.0` is not compatible with `0.2`: clients and proxies must both be
+updated, no `0.2` data is migrated, and transfers still in flight must be
+completed or abandoned before the upgrade.
 
 The rationale behind the protocol design, its limitations and the changes with
 respect to version `0.2` are described in the [v1.0 changes specification].
@@ -153,9 +159,9 @@ pubkey `e11a179a775712d6763f01de1e10a6141c08f098816aa89a0da333974bf8bc2b`:
   padding)
 - hashes of files are SHA-256 hashes of their plaintext content
 
-Methods uploading a file ([`consignment.post`](#consignmentpost) and
-[`media.post`](#mediapost)) use a multipart form (see
-[Protocol methods](#protocol-methods)).
+Methods uploading a file ([`consignment.post`](#consignmentpost),
+[`media.post`](#mediapost) and [`ack.prepare`](#ackprepare)) use a multipart
+form (see [Protocol methods](#protocol-methods)).
 
 ### Keys and signatures
 
@@ -180,8 +186,8 @@ Every signature follows the same scheme:
 | method | signer | message |
 |--------|--------|---------|
 | `invoice.prepare` (optional) | authentication key | `invoice_id`, `expires_at`, `recipient_pk`, quota (`1` if omitted) |
-| `consignment.post` | sender key | `transfer_id`, `consignment_hash`, `blob_hash` |
-| `media.post` | sender key | `transfer_id`, `media_id`, `blob_hash` |
+| `consignment.post` | sender key | `transfer_id`, `consignment_hash`, `blob_hash`, literal `consignment` |
+| `media.post` | sender key | `transfer_id`, `media_id`, `blob_hash`, literal `media` |
 | `transfer.list` | invoice key | `invoice_id`, `timestamp` |
 | `transfer.retrieved` | invoice key | `transfer_id`, literal `retrieved` |
 | `transfer.delete` | invoice key | `transfer_id`, literal `delete` |
@@ -427,17 +433,34 @@ Clients can refuse to compute proofs of work above their own limits.
 All methods are JSON-RPC 2.0 requests sent via HTTP `POST` to the proxy
 endpoint (e.g. `https://proxy.example.com/json-rpc`), with an
 `application/json` body, except the methods uploading a file
-([`consignment.post`](#consignmentpost) and [`media.post`](#mediapost)), which
-use a `multipart/form-data` body: the file is attached under the `file` name,
-while the JSON-RPC fields are sent as form fields, with `params` as a
-JSON-encoded string, which must precede the file.
+([`consignment.post`](#consignmentpost), [`media.post`](#mediapost) and
+[`ack.prepare`](#ackprepare)), which use a `multipart/form-data` body: the file
+is attached under the `file` name, while the JSON-RPC fields are sent as form
+fields, with `params` as a JSON-encoded string, which must precede the file.
+Proxies may also accept the parameters as one `params[<name>]` form field each,
+but only the JSON-encoded `params` field is guaranteed, and it is the only
+option for `ack.prepare`, whose `transfer_data` parameter is a nested object.
+Proxies bound the number and size of the form fields of a request.
+
+Each request carries a single call: a JSON-RPC batch (an array of calls) is
+refused ([`-32600`](#json-rpc-errors)), because it would multiply the cost of
+a request beyond what the limits of each call allow. For the same reason, a
+JSON body larger than a call listing `max_transfers` IDs (see
+[`server.info`](#serverinfo)) is refused ([`-32600`](#json-rpc-errors)).
+Clients must therefore send their calls one per request and disable any
+automatic batching of their JSON-RPC library. Note that this has nothing to do
+with the `batch` parameter, which flags an operation with more than one
+transfer (multiple recipients) and is fully supported.
 
 Upload checks, applied while receiving the request and right after the
 parameter validation:
 - a file part arriving before `params` is refused ([`-200`](#invalid--200),
   with `file` among the fields)
-- a declared `file_size` above `max_file_size` (see
-  [`server.info`](#serverinfo)) is refused ([`-108`](#file-too-large--108))
+- a declared `file_size` above the maximum is refused
+  ([`-108`](#file-too-large--108)): `max_file_size` (see
+  [`server.info`](#serverinfo)) for [`consignment.post`](#consignmentpost) and
+  [`media.post`](#mediapost), the `ack.prepare` maximum (see
+  [`ack.prepare`](#ackprepare)) for [`ack.prepare`](#ackprepare)
 - a missing file is refused ([`-301`](#missing-file--301))
 - the received file must be exactly `file_size` bytes, otherwise it's refused
   ([`-200`](#invalid--200), with `file_size` among the fields); a larger file
@@ -474,7 +497,8 @@ HTTP `POST`, `application/json` body.
     "retention_grace_secs": "2592000",
     "max_file_size": "104857600",
     "max_signed_tx_size": "153600",
-    "max_transfers": "1000"
+    "max_transfers": "1000",
+    "max_media": "100"
   }
 }
 ```
@@ -493,11 +517,17 @@ Result:
 - `retention_grace_secs`: how long, after the expiration, the proxy
   guarantees to keep data awaiting retrieval (`0` if no grace is granted)
 - `max_file_size`: the maximum size, in bytes, of a file uploaded via
-  [`consignment.post`](#consignmentpost) or [`media.post`](#mediapost)
+  [`consignment.post`](#consignmentpost) or [`media.post`](#mediapost); it does
+  not apply to the file of [`ack.prepare`](#ackprepare), which is bounded by
+  `max_transfers` and `max_signed_tx_size` instead (see
+  [`ack.prepare`](#ackprepare))
 - `max_signed_tx_size`: the maximum size of each signed TX in
   [`ack.prepare`](#ackprepare), measured as the length of its base64 string
 - `max_transfers`: the maximum number of transfers an
-  [`ack.prepare`](#ackprepare) call can include
+  [`ack.prepare`](#ackprepare) call can include, which also bounds the number
+  of IDs in [`invoice.check`](#invoicecheck), [`ack.get`](#ackget) and
+  [`ack.clean`](#ackclean) calls
+- `max_media`: the maximum number of media attachments a transfer can have
 
 ### invoice.prepare
 
@@ -552,6 +582,7 @@ Behavior:
 
 Errors:
 - [`-100`](#cannot-change--100)
+- [`-115`](#server-draining--115)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-501`](#invalid-proxy-auth-signature--501)
@@ -608,11 +639,15 @@ Behavior:
   [`consignment.post`](#consignmentpost) will succeed
 - the status doesn't consider the invoice expiration, which the sender knows
   from the invoice
+- a request with more than `max_transfers` invoice IDs (see
+  [`server.info`](#serverinfo)) is refused
+  ([`-109`](#too-many-items--109))
 
 Senders should check each invoice on all the transport endpoints it lists,
 typically stopping at the first one that returns `available`.
 
 Errors:
+- [`-109`](#too-many-items--109)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 
@@ -701,6 +736,7 @@ Errors:
 - [`-112`](#invoice-quota-exceeded--112)
 - [`-113`](#transfer-id-deleted--113)
 - [`-114`](#invalid-proof-of-work--114)
+- [`-115`](#server-draining--115)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-301`](#missing-file--301)
@@ -808,11 +844,15 @@ Behavior:
   expiration (e.g. for a transfer created right before it), as long as its
   data has not been retrieved ([`-403`](#transfer-data-retrieved--403))
 - an identical re-post returns `false`, also after
-  [`transfer.retrieved`](#transferretrieved)
+  [`transfer.retrieved`](#transferretrieved), and doesn't count towards
+  `max_media`
+- a new media is refused ([`-116`](#too-many-media--116)) when the transfer
+  already has `max_media` media (see [`server.info`](#serverinfo))
 
 Errors:
 - [`-100`](#cannot-change--100)
 - [`-108`](#file-too-large--108)
+- [`-116`](#too-many-media--116)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-301`](#missing-file--301)
@@ -1034,7 +1074,20 @@ Not needed for donations.
 
 #### request
 
-HTTP `POST`, `application/json` body.
+HTTP `POST`, `multipart/form-data` body.
+
+In addition to the parameters, the signed TXs need to be attached under the
+`file` name via multipart form. The file is a JSON object mapping each transfer
+ID to its signed TX, encrypted for the recipient and base64-encoded, with
+exactly the transfer IDs of `transfer_data`:
+
+```json
+{
+  "6313972fcf4dfede897ed8cd932c579af0eb83c57ff8a8f6def81412ccd4ae0e": "AQHrCMd+mQ6ZeYBnUo2Jf7d8pY1tL4bX2hKzQ0vV3wQ5E6iRgS1u8aPcN7yTjW+0fA=="
+}
+```
+
+The parameters are:
 
 ```json
 {
@@ -1044,13 +1097,13 @@ HTTP `POST`, `application/json` body.
     "transfer_data": {
       "6313972fcf4dfede897ed8cd932c579af0eb83c57ff8a8f6def81412ccd4ae0e": {
         "recipient_pk": "5c298bf4b0dcf967871778ca682b4de838eb7a201853845c49adc15b10681360",
-        "consignment_hash": "0949f665e0563c0a769aee4dbea0f71f958b183985ab892e7745d3c67a0560a0",
-        "signed_tx": "AQHrCMd+mQ6ZeYBnUo2Jf7d8pY1tL4bX2hKzQ0vV3wQ5E6iRgS1u8aPcN7yTjW+0fA=="
+        "consignment_hash": "0949f665e0563c0a769aee4dbea0f71f958b183985ab892e7745d3c67a0560a0"
       }
     },
     "expires_at": "1791710000",
     "signed_tx_hash": "cbcc7a7e01884c0493372da517f21cf52d90bf9715868086a1bdbaea5ddde5f6",
-    "sender_pk": "e11a179a775712d6763f01de1e10a6141c08f098816aa89a0da333974bf8bc2b"
+    "sender_pk": "e11a179a775712d6763f01de1e10a6141c08f098816aa89a0da333974bf8bc2b",
+    "file_size": "139"
   }
 }
 ```
@@ -1059,7 +1112,6 @@ Params:
 - `transfer_data`: a map from transfer ID to:
     - `recipient_pk`: the invoice pubkey of the transfer
     - `consignment_hash`: the hex-encoded SHA-256 of the plaintext consignment
-    - `signed_tx`: the signed TX, encrypted for the recipient, base64-encoded
 - `expires_at`: the operation expiration, which must be in the future and not
   exceed `max_expiry_secs`
 - `signed_tx_hash`: the hex-encoded SHA-256 of the plaintext signed TX (the
@@ -1068,6 +1120,7 @@ Params:
   sender on [`ack.get`](#ackget) and [`ack.clean`](#ackclean)
 - `signature`: (optional) required only if the proxy is configured with
   authentication pubkeys (see [Keys and signatures](#keys-and-signatures))
+- `file_size`: the size of the file, in bytes
 
 #### response
 
@@ -1089,8 +1142,29 @@ Behavior:
 - a request with the same transfer IDs as an existing operation but a
   differing field is refused ([`-100`](#cannot-change--100), listing the
   differing fields)
-- the proxy refuses requests with more than `max_transfers` transfers or with a
-  signed TX larger than `max_signed_tx_size` (see [`server.info`](#serverinfo))
+- the proxy refuses requests with more than `max_transfers` transfers
+  ([`-109`](#too-many-items--109)) or with a signed TX larger than
+  `max_signed_tx_size` ([`-110`](#signed-tx-too-large--110), see
+  [`server.info`](#serverinfo))
+- `max_file_size` does not apply to the file: its maximum size is
+  `max_transfers` times (`max_signed_tx_size` plus 70 bytes, the transfer ID,
+  its JSON punctuation and the separator of each entry), and a proxy accepts at
+  least that (it can allow a little more, e.g. for whitespace); a larger
+  declared `file_size` is refused ([`-108`](#file-too-large--108))
+- the file must be a JSON object of base64 strings with exactly the transfer
+  IDs of `transfer_data`: a file that isn't ([`-200`](#invalid--200), with
+  `file` among the fields), a transfer without a signed TX
+  ([`-300`](#missing--300), with `signed_tx`) or a signed TX that isn't valid
+  base64 or for another transfer ([`-200`](#invalid--200), with `signed_tx`)
+  are refused
+- the checks run in this order: the request (a single call, with a JSON-RPC
+  envelope within the size limit), the parameters (missing ones first, then
+  invalid ones), `max_transfers`, the upload checks (see
+  [Protocol methods](#protocol-methods)), the `signature` (if the proxy
+  requires it), the content of the file (including `max_signed_tx_size`) and
+  lastly the registration of the operation; the signature does not cover the
+  signed TXs, so it is verified before the file is read, and a caller that is
+  not allowed doesn't make the proxy read it
 - an identical re-post returns `false` only until the expiration and while the
   signed TXs have not been removed (by [`ack.clean`](#ackclean) or after a
   NACK); after that it's refused ([`-200`](#invalid--200) or
@@ -1099,10 +1173,13 @@ Behavior:
 Errors:
 - [`-100`](#cannot-change--100)
 - [`-102`](#transfer-id-in-use--102)
-- [`-109`](#too-many-transfers--109)
+- [`-108`](#file-too-large--108)
+- [`-109`](#too-many-items--109)
 - [`-110`](#signed-tx-too-large--110)
+- [`-115`](#server-draining--115)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
+- [`-301`](#missing-file--301)
 - [`-501`](#invalid-proxy-auth-signature--501)
 
 ### ack.post
@@ -1277,6 +1354,9 @@ Result:
 Transfers that have not been responded to yet are not included.
 
 Behavior:
+- a request with more than `max_transfers` transfer IDs (see
+  [`server.info`](#serverinfo)) is refused
+  ([`-109`](#too-many-items--109))
 - a request with an unknown transfer ID, or with transfer IDs belonging to more
   than one operation, is refused ([`-104`](#operation-not-found--104))
 - once the operation has expired, the set of responses is final
@@ -1285,6 +1365,7 @@ Behavior:
 
 Errors:
 - [`-104`](#operation-not-found--104)
+- [`-109`](#too-many-items--109)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-502`](#invalid-endpoint-auth-signature--502)
@@ -1338,6 +1419,9 @@ Behavior:
   processed atomically: either the signed TXs are removed before the last ACK
   is registered, so no TX is released, or the ACK is registered first and
   `ack.clean` is refused
+- a request with more than `max_transfers` transfer IDs (see
+  [`server.info`](#serverinfo)) is refused
+  ([`-109`](#too-many-items--109))
 - a request whose transfer IDs aren't exactly all those of a single operation
   is refused ([`-104`](#operation-not-found--104))
 - the operation record is kept, so its transfer IDs can't be reused and later
@@ -1346,6 +1430,7 @@ Behavior:
 Errors:
 - [`-104`](#operation-not-found--104)
 - [`-107`](#already-acked--107)
+- [`-109`](#too-many-items--109)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-502`](#invalid-endpoint-auth-signature--502)
@@ -1375,13 +1460,13 @@ The sender:
 - doesn't create a transfer after the invoice expiration
 - if a transfer cannot be created on a transport endpoint (e.g.
   [`-111`](#invoice-expired--111), [`-112`](#invoice-quota-exceeded--112),
-  [`-113`](#transfer-id-deleted--113)), tries the other transport endpoints
-  listed in the invoice; only if none accepts it, fails the operation, calling
-  [`ack.clean`](#ackclean) first for non-donation operations; for a donation
-  whose consignment has already been posted for another transfer of the
-  operation, it can only fail the operation after spending one of the TX
-  inputs, otherwise it completes it and hands the missing consignment over by
-  other means
+  [`-113`](#transfer-id-deleted--113), [`-115`](#server-draining--115)),
+  tries the other transport endpoints listed in the invoice; only if none
+  accepts it, fails the operation, calling [`ack.clean`](#ackclean) first for
+  non-donation operations; for a donation whose consignment has already been
+  posted for another transfer of the operation, it can only fail the operation
+  after spending one of the TX inputs, otherwise it completes it and hands the
+  missing consignment over by other means
 - verifies the ACK signatures returned by [`ack.get`](#ackget) and saves them,
   together with the invoices, as proof of acceptance
 - keeps the consignment, so it can be handed over by other means if needed
@@ -1501,7 +1586,8 @@ if so, progress it instead; once failed, a transfer is final.
 
 Errors follow [JSON-RPC 2.0] rules and their codes are divided in 5 categories:
 [State](#state), [Invalid](#invalid), [Missing](#missing),
-[Not found](#not-found) and [Security](#security).
+[Not found](#not-found) and [Security](#security), plus the standard
+[JSON-RPC errors](#json-rpc-errors) for requests that aren't valid calls.
 
 When present, `error.data` contains the list of failing fields (`fields`) or,
 for [`-114`](#invalid-proof-of-work--114), the current difficulty
@@ -1561,17 +1647,28 @@ a different file in [`-100`](#cannot-change--100)).
 
 #### File too large (-108)
 
+The declared `file_size` exceeds the maximum: `max_file_size` for
+[`consignment.post`](#consignmentpost) and [`media.post`](#mediapost), the
+`ack.prepare` maximum for [`ack.prepare`](#ackprepare) (see
+[`server.info`](#serverinfo)).
+
 ```json
 { "id": 1, "error": { "code": -108, "message": "File too large" } }
 ```
 
-#### Too many transfers (-109)
+#### Too many items (-109)
+
+The request includes more than `max_transfers` transfers (`ack.prepare`) or IDs
+(`invoice.check`, `ack.get`, `ack.clean`), see [`server.info`](#serverinfo).
 
 ```json
-{ "id": 1, "error": { "code": -109, "message": "Too many transfers" } }
+{ "id": 1, "error": { "code": -109, "message": "Too many items" } }
 ```
 
 #### Signed TX too large (-110)
+
+A signed TX in [`ack.prepare`](#ackprepare) exceeds `max_signed_tx_size` (see
+[`server.info`](#serverinfo)).
 
 ```json
 { "id": 1, "error": { "code": -110, "message": "Signed TX too large" } }
@@ -1608,6 +1705,22 @@ a different file in [`-100`](#cannot-change--100)).
     }
   }
 }
+```
+
+#### Server draining (-115)
+
+The proxy doesn't accept new transfers, other calls keep working.
+
+```json
+{ "id": 1, "error": { "code": -115, "message": "Server draining" } }
+```
+
+#### Too many media (-116)
+
+The transfer already has `max_media` media (see [`server.info`](#serverinfo)).
+
+```json
+{ "id": 1, "error": { "code": -116, "message": "Too many media" } }
 ```
 
 ### Invalid
@@ -1706,6 +1819,21 @@ a different file in [`-100`](#cannot-change--100)).
 
 ```json
 { "id": 1, "error": { "code": -503, "message": "Invalid content signature" } }
+```
+
+### JSON-RPC errors
+
+These errors come from the request itself, not from a method, so their `id` is
+`null`.
+
+#### Invalid Request (-32600)
+
+The request isn't a single, valid JSON-RPC call: it is a JSON-RPC batch (an
+array of calls), or not an object, or its JSON body is larger than a call
+listing `max_transfers` IDs can be (see [Protocol methods](#protocol-methods)).
+
+```json
+{ "id": null, "error": { "code": -32600, "message": "Invalid Request" } }
 ```
 
 
