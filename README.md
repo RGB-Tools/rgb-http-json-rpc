@@ -552,6 +552,7 @@ Behavior:
 
 Errors:
 - [`-100`](#cannot-change--100)
+- [`-115`](#server-draining--115)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-501`](#invalid-proxy-auth-signature--501)
@@ -701,6 +702,7 @@ Errors:
 - [`-112`](#invoice-quota-exceeded--112)
 - [`-113`](#transfer-id-deleted--113)
 - [`-114`](#invalid-proof-of-work--114)
+- [`-115`](#server-draining--115)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-301`](#missing-file--301)
@@ -1101,6 +1103,7 @@ Errors:
 - [`-102`](#transfer-id-in-use--102)
 - [`-109`](#too-many-transfers--109)
 - [`-110`](#signed-tx-too-large--110)
+- [`-115`](#server-draining--115)
 - [`-200`](#invalid--200)
 - [`-300`](#missing--300)
 - [`-501`](#invalid-proxy-auth-signature--501)
@@ -1375,13 +1378,13 @@ The sender:
 - doesn't create a transfer after the invoice expiration
 - if a transfer cannot be created on a transport endpoint (e.g.
   [`-111`](#invoice-expired--111), [`-112`](#invoice-quota-exceeded--112),
-  [`-113`](#transfer-id-deleted--113)), tries the other transport endpoints
-  listed in the invoice; only if none accepts it, fails the operation, calling
-  [`ack.clean`](#ackclean) first for non-donation operations; for a donation
-  whose consignment has already been posted for another transfer of the
-  operation, it can only fail the operation after spending one of the TX
-  inputs, otherwise it completes it and hands the missing consignment over by
-  other means
+  [`-113`](#transfer-id-deleted--113), [`-115`](#server-draining--115)),
+  tries the other transport endpoints listed in the invoice; only if none
+  accepts it, fails the operation, calling [`ack.clean`](#ackclean) first for
+  non-donation operations; for a donation whose consignment has already been
+  posted for another transfer of the operation, it can only fail the operation
+  after spending one of the TX inputs, otherwise it completes it and hands the
+  missing consignment over by other means
 - verifies the ACK signatures returned by [`ack.get`](#ackget) and saves them,
   together with the invoices, as proof of acceptance
 - keeps the consignment, so it can be handed over by other means if needed
@@ -1608,6 +1611,14 @@ a different file in [`-100`](#cannot-change--100)).
     }
   }
 }
+```
+
+#### Server draining (-115)
+
+The proxy doesn't accept new transfers, other calls keep working.
+
+```json
+{ "id": 1, "error": { "code": -115, "message": "Server draining" } }
 ```
 
 ### Invalid
